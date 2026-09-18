@@ -16,6 +16,37 @@ function incrementTokenForSelect(increment, increment_scales) {
 	return increment_scales ? `${increment}*n` : String(increment);
 }
 
+// Which deployment this page is served from. A LAN address counts as local: it
+// is how a phone or a second machine reaches a dev server running on this host.
+function isLocalHost(){
+	const host = window.location.hostname;
+	return host === "localhost" || host === "127.0.0.1" || host.indexOf("192.168.") === 0;
+}
+
+function isBetaHost(){
+	return window.location.host.indexOf("beta") > -1;
+}
+
+// The API for this deployment, e.g. getApiUrl("/v1/ratings/alice"). Locally the
+// API runs on this same host, so a LAN client reaches it at the address it used
+// for the client itself rather than at its own localhost.
+function getApiUrl(path){
+	if(isLocalHost()){
+		return "http://" + window.location.hostname + ":3004" + path;
+	}
+	if(isBetaHost()){
+		return "https://api.beta.playtak.com" + path;
+	}
+	return "https://api.playtak.com" + path;
+}
+
+// PTN Ninja's beta deployment tracks PlayTak's, so local and beta builds open
+// games there instead of in production PTN Ninja. Used for both the embedded
+// 2D board and the "Open in PTN Ninja" link.
+function getPtnNinjaUrl(){
+	return (isLocalHost() || isBetaHost()) ? "https://next.ptn.ninja/" : "https://ptn.ninja/";
+}
+
 const gamePresets = {
 	beginner: {
 		size: 6,
@@ -248,16 +279,7 @@ function init() {
 		"&gameTimer=" +
 		showHeader +
 		"&showHeader=false&showEval=false&showRoads=false&stackCounts=false&notifyGame=false";
-	if (
-		window.location.host.indexOf("localhost") > -1 ||
-		window.location.host.indexOf("127.0.0.1") > -1 ||
-		window.location.host.indexOf("192.168.") == 0 ||
-		window.location.host.indexOf("beta.playtak.com") > -1
-	) {
-		ninjaElement.src = "https://next.ptn.ninja/" + ninjaParams;
-	} else {
-		ninjaElement.src = "https://ptn.ninja/" + ninjaParams;
-	}
+	ninjaElement.src = getPtnNinjaUrl() + ninjaParams;
 	if (prefers2DBoard()) {
 		document.getElementById("ninja-wrapper").style.display = "block";
 		document.getElementById("3d-settings").style.display = "none";
@@ -480,7 +502,6 @@ function copyNotationToClipboard() {
 	);
 }
 
-const PTN_NINJA_URL = "https://ptn.ninja/";
 // ptn.ninja rejects URLs longer than about 8 KB.
 const PTN_NINJA_MAX_URL_LENGTH = 8000;
 
@@ -491,19 +512,8 @@ const PTN_NINJA_MAX_URL_LENGTH = 8000;
 // null if the clocks could not be fetched.
 let ptnWithClocksRequest = null;
 
-function getGamesHistoryApiUrl(){
-	const host = window.location.hostname;
-	if(host === "localhost" || host === "127.0.0.1" || host.indexOf("192.168.") === 0){
-		return "http://" + host + ":3004/v1/games-history";
-	}
-	if(window.location.host.indexOf("beta") > -1){
-		return "https://api.beta.playtak.com/v1/games-history";
-	}
-	return "https://api.playtak.com/v1/games-history";
-}
-
 async function fetchPtnWithClocks(gameId, moveCount){
-	const url = getGamesHistoryApiUrl() + "/ptn/" + gameId + "?clocks=true";
+	const url = getApiUrl("/v1/games-history/ptn/" + gameId + "?clocks=true");
 	// The server saves the game as it announces the result, so this can race
 	// that write; a saved game with moves always has clocks, so retry once.
 	for(let attempt = 0; attempt < 2; attempt++){
@@ -546,12 +556,12 @@ function getPtnNinjaLink(ptnWithClocks){
 	const clockNotes = ptnWithClocks ? ptnWithClocks.split("{clock").length - 1 : 0;
 	if(ptnWithClocks && clockNotes === gameData.move_count - gameData.move_start + 1){
 		// Compressed (PTN Ninja detects this) to keep long games under the URL limit.
-		const link = PTN_NINJA_URL + LZString.compressToEncodedURIComponent(ptnWithClocks);
+		const link = getPtnNinjaUrl() + LZString.compressToEncodedURIComponent(ptnWithClocks);
 		if(link.length <= PTN_NINJA_MAX_URL_LENGTH){
 			return link;
 		}
 	}
-	return PTN_NINJA_URL + encodeURIComponent(getNotation());
+	return getPtnNinjaUrl() + encodeURIComponent(getNotation());
 }
 
 function openInPtnNinja(){
@@ -808,16 +818,7 @@ function showElement(element, type) {
 async function fetchEvents() {
 	showElement("loading-events");
 	try {
-		let path = "/events";
-		let url = "https://api." + window.location.host;
-		if (
-			window.location.host.indexOf("localhost") > -1 ||
-			window.location.host.indexOf("127.0.0.1") > -1 ||
-			window.location.host.indexOf("192.168.") == 0
-		) {
-			url = "http://localhost:3004";
-		}
-		const results = await fetch(url + path, {
+		const results = await fetch(getApiUrl("/events"), {
 			method: "GET",
 		});
 		// An error response is still JSON, so parsing it succeeds and the failure
